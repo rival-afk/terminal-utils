@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import getpass
 from pathlib import Path
 import subprocess as sp
+import shutil
 
 CONFIG_DIR = Path.home() / ".config" / "sua"
 PERMS_FILE = CONFIG_DIR / "permissions.json"
@@ -57,6 +58,12 @@ def get_caller_info():
         caller = "shell"
     return user, caller
 
+def find_elevator():
+    for cmd in ["pkexec", "sudo"]:
+        if shutil.which(cmd):
+            return cmd
+    return None
+
 def detect_system_theme():
     try:
         result = sp.run(
@@ -79,7 +86,7 @@ def detect_system_theme():
     return "light"
 
 class SuaDialog:
-    def __init__(self, user, caller, command_str):
+    def __init__(self, user, caller, command_str, elevator):
         self.result = False
         self.all_day = False
 
@@ -143,6 +150,11 @@ class SuaDialog:
                              bg=cmd_bg, fg=fg, anchor="w", padx=10, pady=8)
         cmd_label.pack(fill="x", pady=(4, 0))
 
+        if elevator:
+            status = tk.Label(card, text=f"Выполнить от root через {elevator}",
+                              font=("", 8), bg=card_bg, fg=muted, anchor="w")
+            status.pack(fill="x", pady=(6, 0))
+
         self.all_day_var = tk.BooleanVar()
         cb_frame = ttk.Frame(main)
         cb_frame.pack(fill="x", pady=(0, 16))
@@ -194,8 +206,17 @@ class SuaDialog:
         return self.result, self.all_day
 
 
-def show_dialog(user, caller, command_str):
-    return SuaDialog(user, caller, command_str).run()
+def show_dialog(user, caller, command_str, elevator):
+    return SuaDialog(user, caller, command_str, elevator).run()
+
+
+def execute_via(cmd_list, elevator):
+    if elevator == "sudo":
+        os.execvp(elevator, [elevator] + cmd_list)
+    elif elevator == "pkexec":
+        os.execvp(elevator, [elevator] + cmd_list)
+    else:
+        os.execvp(cmd_list[0], cmd_list)
 
 
 def main():
@@ -222,6 +243,8 @@ def main():
     if cmd_base == "sua":
         print("Ошибка: рекурсивный вызов sua запрещён", file=sys.stderr)
         sys.exit(1)
+
+    elevator = find_elevator()
 
     SHELL_BUILTINS = {
         "cd": "встроенная команда оболочки",
@@ -269,7 +292,7 @@ def main():
             print(f"sua: {cmd}: команда не найдена", file=sys.stderr)
             print(f"sua: «{cmd}» — {SHELL_BUILTINS[cmd]}, она не может быть запущена напрямую.", file=sys.stderr)
             if cmd == "cd":
-                print("sua: используйте: sua -s или sua sh -c \"cd <путь> && <команда>\"", file=sys.stderr)
+                print("sua: используйте: sua sh -c \"cd <путь> && <команда>\"", file=sys.stderr)
             else:
                 print("sua: используйте: sua sh -c \"<команда>\" для выполнения в подоболочке", file=sys.stderr)
         else:
@@ -278,11 +301,11 @@ def main():
 
     try:
         if is_allowed(cmd_base):
-            os.execvp(sys.argv[1], sys.argv[1:])
+            execute_via(sys.argv[1:], elevator)
     except FileNotFoundError:
         report_error(cmd_base)
 
-    allowed, all_day = show_dialog(user, caller, command_str)
+    allowed, all_day = show_dialog(user, caller, command_str, elevator)
 
     if not allowed:
         print("Отклонено", file=sys.stderr)
@@ -292,7 +315,7 @@ def main():
         allow_all_day(cmd_base)
 
     try:
-        os.execvp(sys.argv[1], sys.argv[1:])
+        execute_via(sys.argv[1:], elevator)
     except FileNotFoundError:
         report_error(cmd_base)
 
