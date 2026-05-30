@@ -223,8 +223,12 @@ def main():
         print("Ошибка: рекурсивный вызов sua запрещён", file=sys.stderr)
         sys.exit(1)
 
-    if is_allowed(cmd_base):
-        os.execvp(sys.argv[1], sys.argv[1:])
+    try:
+        if is_allowed(cmd_base):
+            os.execvp(sys.argv[1], sys.argv[1:])
+    except FileNotFoundError:
+        print(f"{sys.argv[1]}: команда не найдена", file=sys.stderr)
+        sys.exit(127)
 
     allowed, all_day = show_dialog(user, caller, command_str)
 
@@ -235,7 +239,11 @@ def main():
     if all_day:
         allow_all_day(cmd_base)
 
-    os.execvp(sys.argv[1], sys.argv[1:])
+    try:
+        os.execvp(sys.argv[1], sys.argv[1:])
+    except FileNotFoundError:
+        print(f"{sys.argv[1]}: команда не найдена", file=sys.stderr)
+        sys.exit(127)
 
 
 if __name__ == "__main__":
