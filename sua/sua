@@ -8,13 +8,11 @@ from tkinter import ttk
 import subprocess
 from datetime import datetime, timedelta
 import getpass
-import hashlib
-import base64
 from pathlib import Path
+import subprocess as sp
 
 CONFIG_DIR = Path.home() / ".config" / "sua"
 PERMS_FILE = CONFIG_DIR / "permissions.json"
-PASSWD_FILE = CONFIG_DIR / "password.enc"
 
 def ensure_config():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,30 +30,21 @@ def save_permissions(perms):
     ensure_config()
     PERMS_FILE.write_text(json.dumps(perms, indent=2))
 
-def get_command_key(cmd_base):
-    return cmd_base
-
 def is_allowed(cmd_base):
     perms = load_permissions()
-    key = get_command_key(cmd_base)
-    entry = perms.get(key)
+    entry = perms.get(cmd_base)
     if entry:
         expires = datetime.fromisoformat(entry["expires"])
         if datetime.now() < expires:
             return True
-        else:
-            del perms[key]
-            save_permissions(perms)
+        del perms[cmd_base]
+        save_permissions(perms)
     return False
 
-def allow_command(cmd_base, all_day=False):
+def allow_all_day(cmd_base):
     perms = load_permissions()
-    key = get_command_key(cmd_base)
-    if all_day:
-        expires = datetime.now().replace(hour=23, minute=59, second=59)
-    else:
-        expires = datetime.now() + timedelta(minutes=5)
-    perms[key] = {"expires": expires.isoformat()}
+    expires = datetime.now().replace(hour=23, minute=59, second=59)
+    perms[cmd_base] = {"expires": expires.isoformat()}
     save_permissions(perms)
 
 def get_caller_info():
@@ -68,86 +57,122 @@ def get_caller_info():
         caller = "shell"
     return user, caller
 
-def hash_password(password):
-    salt = os.urandom(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100000)
-    return base64.b64encode(salt + key).decode()
-
-def verify_password(stored, password):
-    data = base64.b64decode(stored)
-    salt = data[:16]
-    key = data[16:]
-    new_key = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 100000)
-    return key == new_key
-
-def get_stored_password():
-    ensure_config()
-    if PASSWD_FILE.exists():
-        return PASSWD_FILE.read_text().strip()
-    return None
-
-def set_stored_password(password):
-    ensure_config()
-    PASSWD_FILE.write_text(hash_password(password))
-    os.chmod(PASSWD_FILE, 0o600)
+def detect_system_theme():
+    try:
+        result = sp.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True, text=True, timeout=1
+        )
+        if "dark" in result.stdout.lower():
+            return "dark"
+    except:
+        pass
+    try:
+        result = sp.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
+            capture_output=True, text=True, timeout=1
+        )
+        if "dark" in result.stdout.lower():
+            return "dark"
+    except:
+        pass
+    return "light"
 
 class SuaDialog:
     def __init__(self, user, caller, command_str):
         self.result = False
         self.all_day = False
-        self.password = None
+
+        theme = detect_system_theme()
+        if theme == "dark":
+            bg = "#1e1e2e"
+            fg = "#cdd6f4"
+            card_bg = "#313244"
+            cmd_bg = "#45475a"
+            sep_color = "#585b70"
+            muted = "#a6adc8"
+            accent = "#89b4fa"
+        else:
+            bg = "#f5f5f5"
+            fg = "#1e1e2e"
+            card_bg = "#ffffff"
+            cmd_bg = "#e6e9ef"
+            sep_color = "#dce0e8"
+            muted = "#6c7086"
+            accent = "#1e66f5"
 
         self.root = tk.Tk()
         self.root.title("sua — подтверждение")
         self.root.resizable(False, False)
+        self.root.configure(bg=bg)
 
-        win_w, win_h = 520, 280
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        x = (sw - win_w) // 2
-        y = (sh - win_h) // 2
-        self.root.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        if theme == "dark":
+            self.root.tk_setPalette(
+                background=bg, foreground=fg,
+                activeBackground=card_bg, activeForeground=fg,
+                selectBackground=accent, selectForeground=fg
+            )
 
-        self.root.configure(bg="#f5f5f5")
+        style = ttk.Style()
+        available = style.theme_names()
+        if "clam" in available:
+            style.theme_use("clam")
+        style.configure("TFrame", background=bg)
+        style.configure("TCheckbutton", background=bg, foreground=fg, font=("", 9))
+        style.map("TCheckbutton",
+                  background=[("active", bg)],
+                  foreground=[("active", fg)])
 
-        main_frame = tk.Frame(self.root, bg="#f5f5f5", padx=20, pady=20)
-        main_frame.pack(fill="both", expand=True)
+        main = ttk.Frame(self.root, padding=20)
+        main.pack(fill="both", expand=True)
 
-        info_frame = tk.Frame(main_frame, bg="#ffffff", relief="solid", bd=1, padx=15, pady=15)
-        info_frame.pack(fill="x", pady=(0, 15))
+        card = tk.Frame(main, bg=card_bg, relief="flat", padx=16, pady=16, highlightbackground=sep_color, highlightthickness=1)
+        card.pack(fill="x", pady=(0, 16))
 
-        tk.Label(info_frame, text=f"Пользователь: {user}", font=("", 10, "bold"),
-                 bg="#ffffff", anchor="w").pack(fill="x")
-        tk.Label(info_frame, text=f"Вызвано из: {caller}", font=("", 9),
-                 bg="#ffffff", anchor="w", fg="#555555").pack(fill="x", pady=(2, 0))
+        tk.Label(card, text=f"Пользователь: {user}", font=("", 10, "bold"),
+                 bg=card_bg, fg=fg, anchor="w").pack(fill="x")
+        tk.Label(card, text=f"Вызвано из: {caller}", font=("", 9),
+                 bg=card_bg, fg=muted, anchor="w").pack(fill="x", pady=(2, 0))
 
-        sep = tk.Frame(info_frame, height=1, bg="#dddddd")
-        sep.pack(fill="x", pady=8)
+        sep = tk.Frame(card, height=1, bg=sep_color)
+        sep.pack(fill="x", pady=10)
 
-        tk.Label(info_frame, text="Команда:", font=("", 9),
-                 bg="#ffffff", anchor="w", fg="#555555").pack(fill="x")
-        cmd_label = tk.Label(info_frame, text=f"  {command_str}", font=("", 10, "bold"),
-                             bg="#f0f0f0", anchor="w", padx=8, pady=6)
-        cmd_label.pack(fill="x", pady=(2, 0))
+        tk.Label(card, text="Команда:", font=("", 9),
+                 bg=card_bg, fg=muted, anchor="w").pack(fill="x")
+        cmd_label = tk.Label(card, text=f"  {command_str}", font=("", 10, "bold"),
+                             bg=cmd_bg, fg=fg, anchor="w", padx=10, pady=8)
+        cmd_label.pack(fill="x", pady=(4, 0))
 
         self.all_day_var = tk.BooleanVar()
-        all_day_cb = tk.Checkbutton(main_frame, text="Разрешить эту команду (с любыми флагами) на весь день",
-                                    variable=self.all_day_var, bg="#f5f5f5",
-                                    font=("", 9), anchor="w")
-        all_day_cb.pack(fill="x", pady=(0, 15))
+        cb_frame = ttk.Frame(main)
+        cb_frame.pack(fill="x", pady=(0, 16))
+        all_day_cb = ttk.Checkbutton(cb_frame, text="Разрешить на весь день (с любыми флагами)",
+                                     variable=self.all_day_var)
+        all_day_cb.pack(anchor="w")
 
-        btn_frame = tk.Frame(main_frame, bg="#f5f5f5")
+        btn_frame = ttk.Frame(main)
         btn_frame.pack(fill="x")
 
         deny_btn = tk.Button(btn_frame, text="Отклонить", command=self.on_deny,
-                             bg="#e74c3c", fg="white", font=("", 10, "bold"),
-                             padx=20, pady=5, bd=0, cursor="hand2")
+                             bg="#e64553", fg="white", font=("", 10, "bold"),
+                             padx=22, pady=6, bd=0, cursor="hand2",
+                             activebackground="#d20f39", activeforeground="white")
         deny_btn.pack(side="right", padx=(8, 0))
 
         allow_btn = tk.Button(btn_frame, text="Разрешить", command=self.on_allow,
-                              bg="#2ecc71", fg="white", font=("", 10, "bold"),
-                              padx=20, pady=5, bd=0, cursor="hand2")
+                              bg="#40a02b", fg="white", font=("", 10, "bold"),
+                              padx=22, pady=6, bd=0, cursor="hand2",
+                              activebackground="#2e7d1e", activeforeground="white")
         allow_btn.pack(side="right")
+
+        self.root.update_idletasks()
+        w = self.root.winfo_reqwidth()
+        h = self.root.winfo_reqheight()
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        x = (sw - w) // 2
+        y = (sh - h) // 2
+        self.root.geometry(f"{w}x{h}+{x}+{y}")
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_deny)
         self.root.grab_set()
@@ -170,8 +195,7 @@ class SuaDialog:
 
 
 def show_dialog(user, caller, command_str):
-    dialog = SuaDialog(user, caller, command_str)
-    return dialog.run()
+    return SuaDialog(user, caller, command_str).run()
 
 
 def main():
@@ -195,7 +219,7 @@ def main():
 
     user, caller = get_caller_info()
 
-    if cmd_base in ("sua",):
+    if cmd_base == "sua":
         print("Ошибка: рекурсивный вызов sua запрещён", file=sys.stderr)
         sys.exit(1)
 
@@ -208,7 +232,9 @@ def main():
         print("Отклонено", file=sys.stderr)
         sys.exit(1)
 
-    allow_command(cmd_base, all_day=all_day)
+    if all_day:
+        allow_all_day(cmd_base)
+
     os.execvp(sys.argv[1], sys.argv[1:])
 
 
