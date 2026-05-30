@@ -4,16 +4,18 @@ import sys
 import os
 import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog
 import subprocess
 from datetime import datetime, timedelta
 import getpass
 from pathlib import Path
-import subprocess as sp
-import shutil
+import base64
+import hashlib
+from cryptography.fernet import Fernet
 
 CONFIG_DIR = Path.home() / ".config" / "sua"
 PERMS_FILE = CONFIG_DIR / "permissions.json"
+AUTH_FILE = CONFIG_DIR / "auth.enc"
 
 def ensure_config():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,6 +50,52 @@ def allow_all_day(cmd_base):
     perms[cmd_base] = {"expires": expires.isoformat()}
     save_permissions(perms)
 
+def get_machine_key():
+    raw = b""
+    for path in ["/etc/machine-id", "/proc/sys/kernel/random/boot_id"]:
+        try:
+            raw += Path(path).read_bytes().strip()
+        except:
+            pass
+    raw += os.uname().nodename.encode()
+    raw += b"sua-secret-v1"
+    key = hashlib.pbkdf2_hmac("sha256", raw, b"sua-salt-v1", 100000, dklen=32)
+    return base64.urlsafe_b64encode(key)
+
+def load_auth():
+    if not AUTH_FILE.exists():
+        return None
+    try:
+        key = get_machine_key()
+        fernet = Fernet(key)
+        data = AUTH_FILE.read_bytes()
+        return fernet.decrypt(data).decode()
+    except:
+        return None
+
+def save_auth(password: str):
+    key = get_machine_key()
+    fernet = Fernet(key)
+    encrypted = fernet.encrypt(password.encode())
+    AUTH_FILE.write_bytes(encrypted)
+    AUTH_FILE.chmod(0o600)
+
+class PasswordDialog(simpledialog.Dialog):
+    def __init__(self, parent, title, prompt):
+        self.prompt = prompt
+        self.password = None
+        super().__init__(parent, title)
+
+    def body(self, parent):
+        tk.Label(parent, text=self.prompt, justify=tk.LEFT).grid(row=0, padx=5, pady=5, sticky="w")
+        self.entry = tk.Entry(parent, show="*", width=40, font=("", 11))
+        self.entry.grid(row=1, padx=5, pady=5)
+        self.entry.focus_force()
+        return self.entry
+
+    def apply(self):
+        self.password = self.entry.get()
+
 def get_caller_info():
     user = os.environ.get("SUDO_USER") or os.environ.get("USER") or getpass.getuser()
     ppid = os.getppid()
@@ -58,15 +106,9 @@ def get_caller_info():
         caller = "shell"
     return user, caller
 
-def find_elevator():
-    for cmd in ["pkexec", "sudo"]:
-        if shutil.which(cmd):
-            return cmd
-    return None
-
 def detect_system_theme():
     try:
-        result = sp.run(
+        result = subprocess.run(
             ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
             capture_output=True, text=True, timeout=1
         )
@@ -75,7 +117,7 @@ def detect_system_theme():
     except:
         pass
     try:
-        result = sp.run(
+        result = subprocess.run(
             ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
             capture_output=True, text=True, timeout=1
         )
@@ -86,7 +128,7 @@ def detect_system_theme():
     return "light"
 
 class SuaDialog:
-    def __init__(self, user, caller, command_str, elevator):
+    def __init__(self, user, caller, command_str):
         self.result = False
         self.all_day = False
 
@@ -150,10 +192,8 @@ class SuaDialog:
                              bg=cmd_bg, fg=fg, anchor="w", padx=10, pady=8)
         cmd_label.pack(fill="x", pady=(4, 0))
 
-        if elevator:
-            status = tk.Label(card, text=f"Выполнить от root через {elevator}",
-                              font=("", 8), bg=card_bg, fg=muted, anchor="w")
-            status.pack(fill="x", pady=(6, 0))
+        tk.Label(card, text="Выполнить от root через sudo",
+                 font=("", 8), bg=card_bg, fg=muted, anchor="w").pack(fill="x", pady=(6, 0))
 
         self.all_day_var = tk.BooleanVar()
         cb_frame = ttk.Frame(main)
@@ -206,17 +246,44 @@ class SuaDialog:
         return self.result, self.all_day
 
 
-def show_dialog(user, caller, command_str, elevator):
-    return SuaDialog(user, caller, command_str, elevator).run()
+def show_dialog(user, caller, command_str):
+    return SuaDialog(user, caller, command_str).run()
 
 
-def execute_via(cmd_list, elevator):
-    if elevator == "sudo":
-        os.execvp(elevator, [elevator] + cmd_list)
-    elif elevator == "pkexec":
-        os.execvp(elevator, [elevator] + cmd_list)
-    else:
-        os.execvp(cmd_list[0], cmd_list)
+def ensure_sudo_password():
+    password = load_auth()
+    if password is not None:
+        return password
+
+    root = tk.Tk()
+    root.withdraw()
+    root.focus_force()
+
+    dialog = PasswordDialog(root, "sua — пароль sudo",
+                            "Введите пароль sudo для выполнения команды от root:")
+    password = dialog.password
+
+    root.destroy()
+
+    if not password:
+        print("Пароль не введён", file=sys.stderr)
+        sys.exit(1)
+
+    save_auth(password)
+    return password
+
+
+def execute_via_sudo(cmd_list: list[str], password: str):
+    cmd = ["sudo", "-S"] + cmd_list
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        text=True,
+    )
+    proc.communicate(input=password + "\n")
+    sys.exit(proc.returncode)
 
 
 def main():
@@ -243,8 +310,6 @@ def main():
     if cmd_base == "sua":
         print("Ошибка: рекурсивный вызов sua запрещён", file=sys.stderr)
         sys.exit(1)
-
-    elevator = find_elevator()
 
     SHELL_BUILTINS = {
         "cd": "встроенная команда оболочки",
@@ -299,13 +364,7 @@ def main():
             print(f"sua: {cmd}: команда не найдена", file=sys.stderr)
         sys.exit(127)
 
-    try:
-        if is_allowed(cmd_base):
-            execute_via(sys.argv[1:], elevator)
-    except FileNotFoundError:
-        report_error(cmd_base)
-
-    allowed, all_day = show_dialog(user, caller, command_str, elevator)
+    allowed, all_day = show_dialog(user, caller, command_str)
 
     if not allowed:
         print("Отклонено", file=sys.stderr)
@@ -314,10 +373,8 @@ def main():
     if all_day:
         allow_all_day(cmd_base)
 
-    try:
-        execute_via(sys.argv[1:], elevator)
-    except FileNotFoundError:
-        report_error(cmd_base)
+    password = ensure_sudo_password()
+    execute_via_sudo(sys.argv[1:], password)
 
 
 if __name__ == "__main__":
