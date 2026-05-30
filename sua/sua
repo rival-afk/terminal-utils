@@ -274,7 +274,7 @@ def ensure_sudo_password():
 
 
 def execute_via_sudo(cmd_list: list[str], password: str):
-    cmd = ["sudo", "-S"] + cmd_list
+    cmd = ["sudo", "-S", "-p", ""] + cmd_list
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
