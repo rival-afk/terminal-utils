@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# Функция для поиска похожих файлов (без учёта регистра)
+find_similar() {
+    local dir="$1"
+    local base="$2"
+    find "$dir" -maxdepth 1 -type f -iname "*$base*" 2>/dev/null | head -5
+}
+
+# Проверка аргумента
+if [ -z "$1" ]; then
+    echo "Ошибка: укажите имя файла."
+    echo "Пример: update index.html"
+    exit 1
+fi
+
+# Проверка, существует ли файл
+if [ -e "$1" ]; then
+    # Если это директория — ошибка
+    if [ -d "$1" ]; then
+        echo "Ошибка: '$1' является директорией, а не файлом."
+        exit 1
+    fi
+    # Удаляем и открываем nano
+    rm -f "$1" && nano "$1"
+else
+    # Файл не существует — ищем похожие
+    dir=$(dirname "$1")
+    base=$(basename "$1")
+    
+    # Если директория не существует
+    if [ ! -d "$dir" ]; then
+        echo "Ошибка: директория '$dir' не существует."
+        exit 1
+    fi
+    
+    # Поиск похожих файлов
+    similar=$(find_similar "$dir" "$base")
+    
+    if [ -n "$similar" ]; then
+        echo "Файл '$1' не найден."
+        echo "Возможно, вы имели в виду:"
+        echo "$similar" | sed 's/^/  /'
+        echo "Проверьте написание пути к файлу."
+    else
+        echo "Файл '$1' не найден. Похожих файлов в '$dir' нет."
+        echo "Проверьте правильность пути."
+    fi
+    exit 1
+fi

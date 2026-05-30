@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# pyreq - generate requirements.txt from current pip list in venv
+
+# Check if we're in a virtual environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    echo "Error: No virtual environment detected. Please activate venv first."
+    exit 1
+fi
+
+# Get current directory
+CURRENT_DIR=$(pwd)
+OUTPUT_FILE="$CURRENT_DIR/requirements.txt"
+
+# Generate requirements.txt with >= format
+pip list --format=freeze 2>/dev/null | sed 's/==/>=/' > "$OUTPUT_FILE"
+
+# Check if successful
+if [ $? -eq 0 ]; then
+    echo "✅ requirements.txt has been created in $CURRENT_DIR"
+    echo "📦 Total packages: $(wc -l < "$OUTPUT_FILE" | tr -d ' ')"
+else
+    echo "❌ Failed to generate requirements.txt"
+    exit 1
+fi
