@@ -12,6 +12,22 @@
 | `pyreq` | Генерирует `requirements.txt` из текущего `pip list` в виртуальном окружении. |
 
 
+## Установка
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rival-afk/terminal-utils/main/install.sh | sh
+```
+
+Скрипт покажет список утилит и спросит, что установить. Без вопросов:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rival-afk/terminal-utils/main/install.sh | sh -s -- sua update
+# или всё сразу:
+curl -fsSL https://raw.githubusercontent.com/rival-afk/terminal-utils/main/install.sh | sh -s -- all
+```
+
+Исполняемые файлы ставятся в `~/.local/bin` (переопределяется переменной `INSTALL_DIR`), исходники `ascii` и его venv — в `~/.local/share/terminal-utils` (`APP_DIR`).
+
 ## Использование
 
 ```bash
