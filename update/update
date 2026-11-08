@@ -1,50 +1,79 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
-# Функция для поиска похожих файлов (без учёта регистра)
-find_similar() {
-    local dir="$1"
-    local base="$2"
-    find "$dir" -maxdepth 1 -type f -iname "*$base*" 2>/dev/null | head -5
-}
+# update - удалить указанный файл и открыть его заново в редакторе.
+# Если файла нет — ищет похожие в той же директории.
 
-# Проверка аргумента
-if [ -z "$1" ]; then
-    echo "Ошибка: укажите имя файла."
-    echo "Пример: update index.html"
-    exit 1
-fi
+import os
+import shlex
+import subprocess
+import sys
 
-# Проверка, существует ли файл
-if [ -e "$1" ]; then
-    # Если это директория — ошибка
-    if [ -d "$1" ]; then
-        echo "Ошибка: '$1' является директорией, а не файлом."
-        exit 1
-    fi
-    # Удаляем и открываем nano
-    rm -f "$1" && nano "$1"
-else
-    # Файл не существует — ищем похожие
-    dir=$(dirname "$1")
-    base=$(basename "$1")
-    
-    # Если директория не существует
-    if [ ! -d "$dir" ]; then
-        echo "Ошибка: директория '$dir' не существует."
-        exit 1
-    fi
-    
-    # Поиск похожих файлов
-    similar=$(find_similar "$dir" "$base")
-    
-    if [ -n "$similar" ]; then
-        echo "Файл '$1' не найден."
-        echo "Возможно, вы имели в виду:"
-        echo "$similar" | sed 's/^/  /'
-        echo "Проверьте написание пути к файлу."
-    else
-        echo "Файл '$1' не найден. Похожих файлов в '$dir' нет."
-        echo "Проверьте правильность пути."
-    fi
-    exit 1
-fi
+# Не падать на консолях без Unicode (например, cp1251 в Windows)
+try:
+    sys.stdout.reconfigure(errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+except AttributeError:
+    pass
+
+
+def editor_command(target: str) -> list:
+    editor = os.environ.get("EDITOR")
+    if editor:
+        return shlex.split(editor, posix=(os.name != "nt")) + [target]
+    return ["notepad" if os.name == "nt" else "nano", target]
+
+
+def find_similar(directory: str, base: str) -> list:
+    base = base.lower()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    matches = []
+    for name in sorted(names):
+        full = os.path.join(directory, name)
+        if os.path.isfile(full) and base in name.lower():
+            matches.append(full)
+        if len(matches) >= 5:
+            break
+    return matches
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        print("Ошибка: укажите имя файла.")
+        print("Пример: update index.html")
+        return 1
+
+    target = sys.argv[1]
+
+    if os.path.exists(target):
+        if os.path.isdir(target):
+            print(f"Ошибка: '{target}' является директорией, а не файлом.")
+            return 1
+        os.remove(target)
+        subprocess.run(editor_command(target))
+        return 0
+
+    directory = os.path.dirname(target) or "."
+    base = os.path.basename(target)
+
+    if not os.path.isdir(directory):
+        print(f"Ошибка: директория '{directory}' не существует.")
+        return 1
+
+    similar = find_similar(directory, base)
+    if similar:
+        print(f"Файл '{target}' не найден.")
+        print("Возможно, вы имели в виду:")
+        for path in similar:
+            print(f"  {path}")
+        print("Проверьте написание пути к файлу.")
+    else:
+        print(f"Файл '{target}' не найден. Похожих файлов в '{directory}' нет.")
+        print("Проверьте правильность пути.")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

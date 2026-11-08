@@ -1,7 +1,7 @@
 import os
 
 # Папка для сохранения результатов по умолчанию
-DEFAULT_OUTPUT_DIR = os.path.expanduser("~") + "/projects/outputs"
+DEFAULT_OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "projects", "outputs")
 
 # Расширения текстовых файлов (которые будем показывать)
 TEXT_EXTENSIONS = {

@@ -106,12 +106,15 @@ install_sua() {
 
 install_update() {
     install_file update
-    need_cmd nano || warn "nano не найден — поставь вручную (sudo apt install nano), иначе update не откроет редактор."
+    need_cmd python3 || { err "Для update нужен python3."; return 1; }
+    if ! need_cmd nano && [ -z "$EDITOR" ]; then
+        warn "Не найден nano и не задан EDITOR — задай EDITOR или поставь nano (sudo apt install nano)."
+    fi
 }
 
 install_pyreq() {
     install_file pyreq
-    need_cmd pip3 || need_cmd pip || warn "pip не найден — pyreq не сможет вызвать 'pip list'."
+    need_cmd python3 || { err "Для pyreq нужен python3."; return 1; }
 }
 
 install_ascii() {
@@ -271,14 +274,54 @@ else
     pick_interactive
 fi
 
-# Подсказка про PATH
-case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
-    *)
-        printf "\n"
-        warn "'$INSTALL_DIR' нет в PATH. Добавь в ~/.bashrc / ~/.zshrc:"
-        printf "    export PATH=\"%s:\$PATH\"\n" "$INSTALL_DIR"
-        ;;
-esac
+# Добавление INSTALL_DIR в PATH (автоматически для bash/zsh/sh/fish)
+
+# Добавляет строку в rc-файл, если такой строки ещё нет
+add_path_line() { # add_path_line <путь к файлу> <строка>
+    [ -f "$1" ] || return 1
+    if ! grep -qsF "$2" "$1"; then
+        printf '\n# >>> terminal-utils PATH >>>\n%s\n# <<< terminal-utils PATH <<<\n' "$2" >> "$1"
+        ok "$1: добавлено '$2'"
+        return 0
+    fi
+    return 1
+}
+
+setup_path() {
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ok "INSTALL_DIR уже в PATH"; return 0 ;;
+    esac
+
+    added=0
+
+    # fish: fish_add_path пишет в universal variables, rc-файл не нужен
+    if need_cmd fish; then
+        if fish -c "fish_add_path -U '$INSTALL_DIR'" >/dev/null 2>&1; then
+            ok "fish: '$INSTALL_DIR' добавлен в PATH (universal)"
+            added=1
+        else
+            warn "Не удалось выполнить fish_add_path — добавь вручную: fish_add_path '$INSTALL_DIR'"
+        fi
+    fi
+
+    # bash / zsh / sh-совместимые rc-файлы
+    PATH_LINE="export PATH=\"$INSTALL_DIR:\$PATH\""
+    add_path_line "$HOME/.bashrc"  "$PATH_LINE" && added=1
+    add_path_line "$HOME/.zshrc"   "$PATH_LINE" && added=1
+    add_path_line "$HOME/.profile" "$PATH_LINE" && added=1
+
+    # Ни одного rc-файла нет — создаём ~/.profile
+    if [ "$added" -eq 0 ] && ! need_cmd fish; then
+        printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR" > "$HOME/.profile"
+        ok "Создан $HOME/.profile с PATH"
+        added=1
+    fi
+
+    if [ "$added" -eq 1 ]; then
+        warn "Открой новое окно терминала или выполни: source ~/.bashrc (или zshrc/profile) — чтобы PATH применился."
+    fi
+}
+
+setup_path
 
 printf "\n%bГотово!%b Утилиты вызываются по имени (sua, update, ascii, pyreq).\n" "$C_GREEN" "$C_OFF"

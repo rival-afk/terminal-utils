@@ -1,25 +1,57 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 # pyreq - generate requirements.txt from current pip list in venv
 
-# Check if we're in a virtual environment
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "Error: No virtual environment detected. Please activate venv first."
-    exit 1
-fi
+import os
+import subprocess
+import sys
 
-# Get current directory
-CURRENT_DIR=$(pwd)
-OUTPUT_FILE="$CURRENT_DIR/requirements.txt"
+# Не падать на консолях без Unicode (например, cp1251 в Windows)
+try:
+    sys.stdout.reconfigure(errors="replace")
+    sys.stderr.reconfigure(errors="replace")
+except AttributeError:
+    pass
 
-# Generate requirements.txt with >= format
-pip list --format=freeze 2>/dev/null | sed 's/==/>=/' > "$OUTPUT_FILE"
 
-# Check if successful
-if [ $? -eq 0 ]; then
-    echo "✅ requirements.txt has been created in $CURRENT_DIR"
-    echo "📦 Total packages: $(wc -l < "$OUTPUT_FILE" | tr -d ' ')"
-else
-    echo "❌ Failed to generate requirements.txt"
-    exit 1
-fi
+def venv_python() -> str:
+    venv = os.environ.get("VIRTUAL_ENV")
+    if venv:
+        candidate = os.path.join(
+            venv,
+            "Scripts" if os.name == "nt" else "bin",
+            "python.exe" if os.name == "nt" else "python",
+        )
+        if os.path.exists(candidate):
+            return candidate
+    return sys.executable
+
+
+def main() -> int:
+    if not os.environ.get("VIRTUAL_ENV"):
+        print("Error: No virtual environment detected. Please activate venv first.")
+        return 1
+
+    output_file = os.path.join(os.getcwd(), "requirements.txt")
+
+    result = subprocess.run(
+        [venv_python(), "-m", "pip", "list", "--format=freeze"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print("❌ Failed to generate requirements.txt")
+        print(result.stderr, file=sys.stderr)
+        return 1
+
+    lines = [line.replace("==", ">=", 1) for line in result.stdout.splitlines() if line.strip()]
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+
+    print(f"✅ requirements.txt has been created in {os.getcwd()}")
+    print(f"📦 Total packages: {len(lines)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
