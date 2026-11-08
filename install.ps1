@@ -105,7 +105,9 @@ function Download-File([string]$Url, [string]$Dest) {
     $oldProgress = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'
     try {
-        Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -ErrorAction Stop
+        # _= добавляем как cache-buster: GitHub его игнорирует, локальный HTTP-кэш нет
+        $bust = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        Invoke-WebRequest -Uri "$Url`?_=$bust" -OutFile $Dest -UseBasicParsing -ErrorAction Stop
     } finally {
         $ProgressPreference = $oldProgress
     }
