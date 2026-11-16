@@ -46,6 +46,10 @@ class ProgressUI:
         )
         self.task_id = self.progress.add_task("Ожидание...", total=100)
 
+        # Сразу назначаем renderable обоим дочерним layout'ам,
+        # иначе rich рисует заглушки "Layout(name='...')"
+        self.layout["progress"].update(self.progress)
+
         # Панель логов
         self._update_logs_panel()
 
@@ -70,7 +74,6 @@ class ProgressUI:
             title=" Логи ",
             border_style="blue",
             box=box.ROUNDED,
-            height=15
         )
         self.layout["logs"].update(panel)
 
