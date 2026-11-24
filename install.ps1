@@ -1,4 +1,4 @@
-﻿# install.ps1 — установщик утилит terminal-utils для Windows
+# install.ps1 — установщик утилит terminal-utils для Windows
 #
 # Использование:
 #   irm https://raw.githubusercontent.com/rival-afk/terminal-utils/main/install.ps1 | iex
